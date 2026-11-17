@@ -1,0 +1,24 @@
+# Dados pessoais e bases locais (nunca publicar)
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+*.zip
+*.7z
+*.rar
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+private/
+dados/
+backups/
+# Artefatos locais
+.wrangler/
+node_modules/
+.DS_Store
+Thumbs.db
