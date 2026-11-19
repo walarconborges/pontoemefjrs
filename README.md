@@ -41,3 +41,19 @@ Para testar sem dados pessoais: conecte à nuvem, crie um registro fictício, sa
 Na aba **Gerar folha de ponto**, selecione **Período de impressão → Vários meses em um PDF**. Informe o mês inicial, o mês final e o ano. A visualização gera as folhas mês a mês em um só documento, mantendo o mesmo modelo A4. Use **Imprimir / Salvar em PDF** para gravar todas as páginas num único PDF.
 
 **Importante para o histórico:** o cadastro atual é uma lista geral de vínculos e pode não representar exatamente a composição da escola em cada mês de 2026. Antes de imprimir arquivos históricos definitivos, confira as ocorrências individuais, o calendário e a lista de servidores referentes a cada mês. Importar uma planilha XLSX substitui o estado inteiro, não acrescenta automaticamente outro mês: consolide os dados primeiro e mantenha um backup.
+
+## Importação do histórico de julho a novembro de 2026
+
+O site aceita a aba opcional `VinculosMensais` (Ano, Mês, Matrícula, Nome, Cargo, Turno), de modo que cada mês possa ter uma composição própria de servidores. O PDF em lote usa a lista, o cargo, o turno e a numeração de **cada mês**, sem alterar o modelo da folha impressa. A aba é preservada na próxima exportação Excel.
+
+Para utilizar a planilha histórica:
+1. Abra o site e **conecte à nuvem**.
+2. **Antes de importar**, exporte uma cópia de segurança dos dados atualmente na nuvem, caso existam.
+3. Importe a planilha consolidada com `Servidores`, `Calendario`, `Situacoes`, `VinculosMensais` e demais abas.
+4. Espere o status **Salvo na nuvem** e teste a reconexão.
+5. Em **Gerar folha de ponto**, selecione **Vários meses em um PDF**, de **julho a novembro de 2026**, e escolha **todos os servidores**. O site prevê **213 páginas** na base preparada a partir dos arquivos de referência.
+6. Use o botão de impressão do próprio site e, no navegador, selecione **Salvar como PDF**.
+
+**Revisão manual necessária:** foram encontradas divergências entre versões de agosto e outubro. O arquivo privado de importação explica cada situação na aba `Conferencias`. Consulte essa aba antes de imprimir um documento oficial.
+
+**Privacidade:** não envie a planilha histórica nem o PDF gerado ao repositório público. A planilha é fornecida como arquivo privado da conversa; o GitHub contém exclusivamente o código.
