@@ -131,6 +131,10 @@ td.invalid-dash{text-align:left;font-weight:700}
 .data-status{font-size:10px;color:#62717c;width:100%;text-align:right;white-space:nowrap}
 .data-status.loaded{color:#28643b}.data-status.dirty{color:#9a5b00;font-weight:700}
 .data-status.empty{color:#8b3434;font-weight:700}
+.cloud-status{font-size:11px;color:#52616b;width:100%;text-align:right}
+.cloud-status.error{color:#9d2626;font-weight:700}
+.cloud-row{display:flex;gap:7px}
+@media(max-width:1050px){.cloud-status{text-align:left}}
 .nodata{margin-bottom:12px;display:none}.nodata.show{display:block}
 .nodata strong{display:block;font-size:14px;margin-bottom:3px}
 @media(max-width:1050px){.dataio{order:3;width:100%;justify-content:flex-start;margin-left:0}.data-status{text-align:left}}
@@ -146,6 +150,9 @@ td.invalid-dash{text-align:left;font-weight:700}
     <div class="dataio">
       <button class="btn primary" id="importarDados">Importar dados</button>
       <button class="btn" id="exportarDados">Exportar dados</button>
+      <button class="btn" id="conectarNuvem" type="button">Conectar à nuvem</button>
+      <button class="btn" id="salvarNuvem" type="button" hidden>Salvar agora</button>
+      <div id="cloudStatus" class="cloud-status">Nuvem desconectada • trabalho local</div>
       <div id="dataStatus" class="data-status empty">Nenhum arquivo de dados importado</div>
     </div>
     <div class="monthbar">
@@ -222,6 +229,7 @@ td.invalid-dash{text-align:left;font-weight:700}
   <div class="sit-list"><b>Situações cadastradas neste mês</b><div id="sitList"></div></div>
 </div><div class="modalfoot"><button class="btn" data-close="modalSituacoes">Fechar</button></div></div></div>
 
+<div class="modalback" id="modalNuvem"><div class="modal"><div class="modalhead"><h3>Conectar aos dados privados</h3><button class="modalclose" data-close="modalNuvem">×</button></div><div class="modalbody"><div class="notice">Informe a chave criada na Cloudflare. Ela é utilizada apenas nesta aba e não é gravada no GitHub, no armazenamento local ou no código do site.</div><div class="field"><label for="chaveNuvem">Chave de acesso (API_TOKEN)</label><input id="chaveNuvem" type="password" autocomplete="off" spellcheck="false" style="width:100%;height:36px;border:1px solid #aeb7be;border-radius:5px;padding:6px 8px"></div></div><div class="modalfoot"><button class="btn" data-close="modalNuvem">Cancelar</button><button class="btn primary" id="confirmarNuvem">Conectar</button></div></div></div>
 <input type="file" id="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
 <script>
 const LOCALIZACAO='E.M.E.F. João Ribeiro Soares';
@@ -237,9 +245,114 @@ let selectedIds=new Set();
 let editingServidorId=null, situacaoServidorId=null, editingSituacaoId=null;
 let dirty=false,dataLoaded=false,loadedFileName='';
 
+// Integração com armazenamento privado: a chave é informada pelo operador,
+// mantida apenas na memória da aba e nunca inserida no código público.
+const CLOUD_API='https://pontoemefjrs-api.wilberalarcon.workers.dev/api/dados';
+let cloudToken='',cloudConnected=false,cloudBusy=false,cloudPending=false,cloudVersion=0,cloudTimer=null;
+function cloudMessage(message,error=false){
+ const el=document.getElementById('cloudStatus');
+ if(el){el.textContent=message;el.className='cloud-status'+(error?' error':'')}
+}
+function cloudControls(){
+ const c=document.getElementById('conectarNuvem'),s=document.getElementById('salvarNuvem');
+ c.textContent=cloudConnected?'Desconectar da nuvem':'Conectar à nuvem';
+ s.hidden=!cloudConnected;
+}
+function cloudDisconnect(){
+ if(cloudPending&&!confirm('Existem alterações ainda não salvas na nuvem. Desconectar mesmo assim?'))return;
+ if(cloudTimer)clearTimeout(cloudTimer);
+ cloudTimer=null;cloudToken='';cloudConnected=false;cloudPending=false;
+ cloudControls();cloudMessage('Nuvem desconectada • trabalho local');
+}
+function cloudChanged(){
+ if(!cloudConnected)return;
+ cloudPending=true;cloudVersion++;
+ cloudMessage('Alterações pendentes • salvamento automático em instantes');
+ if(cloudTimer)clearTimeout(cloudTimer);
+ cloudTimer=setTimeout(cloudFlush,1300);
+}
+async function cloudFlush(){
+ if(!cloudConnected||!cloudPending||cloudBusy)return;
+ if(cloudTimer)clearTimeout(cloudTimer);
+ cloudTimer=null;
+ const version=cloudVersion;
+ cloudBusy=true;
+ cloudMessage('Salvando alterações na nuvem...');
+ try{
+  const response=await fetch(CLOUD_API,{
+   method:'PUT',mode:'cors',cache:'no-store',
+   headers:{'Authorization':'Bearer '+cloudToken,'Content-Type':'application/json'},
+   body:JSON.stringify({dados:state})
+  });
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.erro||('Erro HTTP '+response.status));
+  if(version===cloudVersion){
+   cloudPending=false;dirty=false;dataLoaded=true;
+   loadedFileName='Dados na nuvem';
+   updateDataStatus();
+   cloudMessage('Salvo na nuvem • '+new Date().toLocaleTimeString('pt-BR'));
+  }
+ }catch(error){
+  cloudMessage('Falha ao salvar: '+error.message+' • use Salvar agora',true);
+ }finally{
+  cloudBusy=false;
+  if(cloudConnected&&cloudPending&&version!==cloudVersion){
+   cloudTimer=setTimeout(cloudFlush,300);
+  }
+ }
+}
+async function cloudConnect(){
+ if(cloudBusy)return;
+ const input=document.getElementById('chaveNuvem');
+ const token=input.value.trim();
+ if(token.length<32){alert('Informe a chave de acesso de pelo menos 32 caracteres.');return}
+ const button=document.getElementById('confirmarNuvem');
+ button.disabled=true;button.textContent='Conectando...';
+ cloudMessage('Validando acesso à nuvem...');
+ try{
+  const response=await fetch(CLOUD_API,{
+   method:'GET',mode:'cors',cache:'no-store',
+   headers:{'Authorization':'Bearer '+token}
+  });
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.erro||('Erro HTTP '+response.status));
+  if(result.dados!==null){
+   const remote=result.dados;
+   if(!remote||!Array.isArray(remote.servidores)||!remote.calendarios||!Array.isArray(remote.logs)){
+    throw new Error('Dados remotos em formato inesperado.');
+   }
+   if((dirty||state.servidores.length)&&!confirm('Existem dados nesta aba. Carregar a nuvem substituirá os dados locais. Deseja continuar?')){
+    cloudMessage('Conexão cancelada para preservar os dados locais');
+    return;
+   }
+   state=remote;
+   selectedIds.clear();
+   dataLoaded=true;dirty=false;loadedFileName='Dados na nuvem';
+   document.getElementById('mes').value=state.mes;
+   document.getElementById('ano').value=state.ano;
+   renderAll();
+  }
+  cloudToken=token;cloudConnected=true;cloudPending=false;cloudVersion=0;
+  input.value='';closeModal('modalNuvem');cloudControls();updateDataStatus();
+  cloudMessage(result.dados===null?
+    'Nuvem vazia • importe ou cadastre dados e use Salvar agora':
+    'Nuvem conectada • dados carregados');
+ }catch(error){
+  cloudMessage('Não foi possível conectar: '+error.message,true);
+  alert('Não foi possível conectar à nuvem. '+error.message);
+ }finally{
+  button.disabled=false;button.textContent='Conectar';
+ }
+}
+function cloudSaveNow(){
+ if(!cloudConnected)return;
+ cloudPending=true;cloudVersion++;
+ cloudFlush();
+}
+
 function uid(prefix='id'){return prefix+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
-function save(){dirty=true;updateDataStatus()}
+function save(){dirty=true;updateDataStatus();cloudChanged()}
 function load(){state={servidores:[],calendarios:{},mes:agora.getMonth()+1,ano:agora.getFullYear(),logs:[]};dirty=false;dataLoaded=false;loadedFileName=''}
 function logChange(acao,s=null,detalhes=''){if(!Array.isArray(state.logs))state.logs=[];state.logs.push({dataHora:new Date().toLocaleString('pt-BR'),acao,matricula:s?.matricula||'',servidor:s?.nome||'',detalhes:String(detalhes||'')})}
 function updateDataStatus(){const el=document.getElementById('dataStatus'),banner=document.getElementById('noDataBanner');if(!el)return;if(!dataLoaded){el.className='data-status empty';el.textContent='Nenhum arquivo de dados importado';banner?.classList.add('show');return}banner?.classList.remove('show');if(dirty){el.className='data-status dirty';el.textContent=`${loadedFileName||'Dados importados'} • alterações ainda não exportadas`}else{el.className='data-status loaded';el.textContent=`${loadedFileName||'Dados importados'} • atualizado`}}
@@ -270,7 +383,7 @@ function normalizeTurno(v){const n=norm(v);return n.startsWith('tard')?'Tarde':'
 function parseDays(v){return [...new Set(String(v??'').split(/[,;\s]+/).map(Number).filter(n=>Number.isFinite(n)&&n>=1&&n<=31))].sort((a,b)=>a-b)}
 function snapshotRows(){return sortedServidores().map(s=>({nome:s.nome,matricula:s.matricula,cargo:s.cargo,turno:s.turno}))}
 function compareSnapshot(snapshot,current){if(!snapshot.length)return[];const byM=a=>new Map(a.map(x=>[String(x.matricula),x])),oldm=byM(snapshot),newm=byM(current),changes=[];for(const [m,n] of newm){const o=oldm.get(m);if(!o)changes.push({acao:'SERVIDOR ADICIONADO NO EXCEL',s:n,detalhes:`Matrícula ${m}`});else{const dif=[];for(const k of ['nome','cargo','turno'])if(String(o[k]??'')!==String(n[k]??''))dif.push(`${k}: ${o[k]??''} → ${n[k]??''}`);if(dif.length)changes.push({acao:'SERVIDOR EDITADO NO EXCEL',s:n,detalhes:dif.join(' | ')})}}for(const [m,o] of oldm)if(!newm.has(m))changes.push({acao:'SERVIDOR REMOVIDO NO EXCEL',s:o,detalhes:`Matrícula ${m}`});return changes}
-async function importWorkbookFile(file){if(dirty&&!confirm('Há alterações ainda não exportadas. Importar outro arquivo descartará essas alterações. Continuar?'))return;try{const book=await readXlsx(file),svMat=book.sheets['Servidores']||Object.values(book.sheets)[0],svrecs=records(svMat);if(!svrecs.length)throw new Error('Não encontrei servidores na planilha. A primeira aba deve se chamar Servidores.');const newState={servidores:[],calendarios:{},mes:new Date().getMonth()+1,ano:new Date().getFullYear(),logs:[]};for(const r of svrecs){const nome=String(pick(r,'Nome')).trim(),matricula=String(pick(r,'Matrícula','Matricula')).trim(),cargo=String(pick(r,'Cargo')).trim(),turno=normalizeTurno(pick(r,'Turno'));if(!nome||!matricula||!cargo)continue;newState.servidores.push({id:uid('srv'),nome,matricula,cargo,turno,situacoes:[]})}if(!newState.servidores.length)throw new Error('Nenhum servidor válido foi encontrado. Use as colunas Nome, Matrícula, Cargo e Turno.');const byMat=new Map(newState.servidores.map(s=>[String(s.matricula),s]));for(const r of records(book.sheets['Situacoes'])){const s=byMat.get(String(pick(r,'Matrícula','Matricula')).trim())||newState.servidores.find(x=>norm(x.nome)===norm(pick(r,'Nome')));if(!s)continue;const ano=+pick(r,'Ano'),mes=+pick(r,'Mês','Mes'),descricao=String(pick(r,'Descrição','Descricao')).trim(),modo=String(pick(r,'Modo')||'alternados'),dias=parseDays(pick(r,'Dias'));if(ano&&mes&&descricao&&dias.length)s.situacoes.push({id:String(pick(r,'ID')||uid('sit')),ano,mes,descricao,modo,dias})}for(const r of records(book.sheets['Calendario'])){const ano=+pick(r,'Ano'),mes=+pick(r,'Mês','Mes'),dia=+pick(r,'Dia');if(!ano||!mes||!dia)continue;const k=`${ano}-${String(mes).padStart(2,'0')}`;if(!newState.calendarios[k])newState.calendarios[k]={};newState.calendarios[k][String(dia)]=String(r[norm('Informação')]??r[norm('Informacao')]??'')}for(const r of records(book.sheets['Logs']))newState.logs.push({dataHora:String(pick(r,'Data/Hora','Data Hora')),acao:String(pick(r,'Ação','Acao')),matricula:String(pick(r,'Matrícula','Matricula')),servidor:String(pick(r,'Servidor')),detalhes:String(pick(r,'Detalhes'))});for(const r of records(book.sheets['Config'])){const k=norm(pick(r,'Chave')),v=pick(r,'Valor');if(k==='mes')newState.mes=+v||newState.mes;if(k==='ano')newState.ano=+v||newState.ano}const snap=records(book.sheets['Snapshot']).map(r=>({nome:String(pick(r,'Nome')),matricula:String(pick(r,'Matrícula','Matricula')),cargo:String(pick(r,'Cargo')),turno:normalizeTurno(pick(r,'Turno'))}));const detected=compareSnapshot(snap,newState.servidores);state=newState;selectedIds.clear();dataLoaded=true;loadedFileName=file.name;dirty=detected.length>0;for(const c of detected)logChange(c.acao,c.s,c.detalhes);document.getElementById('mes').value=state.mes;document.getElementById('ano').value=state.ano;renderAll();updateDataStatus();if(detected.length)alert(`Dados importados. Foram detectadas ${detected.length} alteração(ões) feitas diretamente no Excel. Elas foram registradas no histórico; exporte o arquivo ao terminar.`)}catch(e){console.error(e);alert('Não foi possível importar a planilha. '+e.message)}finally{document.getElementById('importFile').value=''}}
+async function importWorkbookFile(file){if(dirty&&!confirm('Há alterações ainda não exportadas. Importar outro arquivo descartará essas alterações. Continuar?'))return;try{if(cloudConnected&&!confirm('A importação substituirá o cadastro armazenado na nuvem. Deseja continuar?'))return;const book=await readXlsx(file),svMat=book.sheets['Servidores']||Object.values(book.sheets)[0],svrecs=records(svMat);if(!svrecs.length)throw new Error('Não encontrei servidores na planilha. A primeira aba deve se chamar Servidores.');const newState={servidores:[],calendarios:{},mes:new Date().getMonth()+1,ano:new Date().getFullYear(),logs:[]};for(const r of svrecs){const nome=String(pick(r,'Nome')).trim(),matricula=String(pick(r,'Matrícula','Matricula')).trim(),cargo=String(pick(r,'Cargo')).trim(),turno=normalizeTurno(pick(r,'Turno'));if(!nome||!matricula||!cargo)continue;newState.servidores.push({id:uid('srv'),nome,matricula,cargo,turno,situacoes:[]})}if(!newState.servidores.length)throw new Error('Nenhum servidor válido foi encontrado. Use as colunas Nome, Matrícula, Cargo e Turno.');const byMat=new Map(newState.servidores.map(s=>[String(s.matricula),s]));for(const r of records(book.sheets['Situacoes'])){const s=byMat.get(String(pick(r,'Matrícula','Matricula')).trim())||newState.servidores.find(x=>norm(x.nome)===norm(pick(r,'Nome')));if(!s)continue;const ano=+pick(r,'Ano'),mes=+pick(r,'Mês','Mes'),descricao=String(pick(r,'Descrição','Descricao')).trim(),modo=String(pick(r,'Modo')||'alternados'),dias=parseDays(pick(r,'Dias'));if(ano&&mes&&descricao&&dias.length)s.situacoes.push({id:String(pick(r,'ID')||uid('sit')),ano,mes,descricao,modo,dias})}for(const r of records(book.sheets['Calendario'])){const ano=+pick(r,'Ano'),mes=+pick(r,'Mês','Mes'),dia=+pick(r,'Dia');if(!ano||!mes||!dia)continue;const k=`${ano}-${String(mes).padStart(2,'0')}`;if(!newState.calendarios[k])newState.calendarios[k]={};newState.calendarios[k][String(dia)]=String(r[norm('Informação')]??r[norm('Informacao')]??'')}for(const r of records(book.sheets['Logs']))newState.logs.push({dataHora:String(pick(r,'Data/Hora','Data Hora')),acao:String(pick(r,'Ação','Acao')),matricula:String(pick(r,'Matrícula','Matricula')),servidor:String(pick(r,'Servidor')),detalhes:String(pick(r,'Detalhes'))});for(const r of records(book.sheets['Config'])){const k=norm(pick(r,'Chave')),v=pick(r,'Valor');if(k==='mes')newState.mes=+v||newState.mes;if(k==='ano')newState.ano=+v||newState.ano}const snap=records(book.sheets['Snapshot']).map(r=>({nome:String(pick(r,'Nome')),matricula:String(pick(r,'Matrícula','Matricula')),cargo:String(pick(r,'Cargo')),turno:normalizeTurno(pick(r,'Turno'))}));const detected=compareSnapshot(snap,newState.servidores);state=newState;selectedIds.clear();dataLoaded=true;loadedFileName=file.name;dirty=detected.length>0;for(const c of detected)logChange(c.acao,c.s,c.detalhes);document.getElementById('mes').value=state.mes;document.getElementById('ano').value=state.ano;renderAll();updateDataStatus();if(cloudConnected){dirty=true;updateDataStatus();cloudChanged()}if(detected.length)alert(`Dados importados. Foram detectadas ${detected.length} alteração(ões) feitas diretamente no Excel. Elas foram registradas no histórico; exporte o arquivo ao terminar.`)}catch(e){console.error(e);alert('Não foi possível importar a planilha. '+e.message)}finally{document.getElementById('importFile').value=''}}
 function workbookSheetsForExport(){const sv=sortedServidores(),serv=[['Nº','Nome','Matrícula','Cargo','Turno'],...sv.map((s,i)=>[String(i+1).padStart(2,'0'),s.nome,s.matricula,s.cargo,s.turno])],cal=[['Ano','Mês','Dia','Informação']],sit=[['Matrícula','Nome','Ano','Mês','Descrição','Modo','Dias','ID']],logs=[['Data/Hora','Ação','Matrícula','Servidor','Detalhes']],cfg=[['Chave','Valor'],['Mes',state.mes],['Ano',state.ano],['Versao','3.2']],snap=[['Nome','Matrícula','Cargo','Turno'],...sv.map(s=>[s.nome,s.matricula,s.cargo,s.turno])];Object.keys(state.calendarios).sort().forEach(k=>{const [a,m]=k.split('-').map(Number);Object.keys(state.calendarios[k]).map(Number).sort((a,b)=>a-b).forEach(d=>cal.push([a,m,d,state.calendarios[k][String(d)]]))});sv.forEach(s=>s.situacoes.forEach(x=>sit.push([s.matricula,s.nome,x.ano,x.mes,x.descricao,x.modo,x.dias.join(', '),x.id])));(state.logs||[]).forEach(x=>logs.push([x.dataHora,x.acao,x.matricula,x.servidor,x.detalhes]));return[{name:'Servidores',data:serv,widths:[7,38,15,34,12],filter:true},{name:'Calendario',data:cal,widths:[10,8,8,28],hidden:true},{name:'Situacoes',data:sit,widths:[15,35,10,8,28,14,22,22],hidden:true},{name:'Logs',data:logs,widths:[20,28,15,35,60],hidden:true},{name:'Config',data:cfg,widths:[18,18],hidden:true},{name:'Snapshot',data:snap,widths:[38,15,34,12],hidden:true}]}
 function exportWorkbookFile(){if(!state.servidores.length){alert('Não há servidores para exportar.');return}const blob=xlsxBlob(workbookSheetsForExport()),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Dados_Folha_de_Ponto.xlsx';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);dirty=false;dataLoaded=true;loadedFileName='Dados_Folha_de_Ponto.xlsx';updateDataStatus()}
 
@@ -283,7 +396,7 @@ function calendarValue(d){const k=monthKey(), cal=state.calendarios[k]||{};retur
 function setCalendarValue(d,v){const k=monthKey(),old=calendarValue(d);if(!state.calendarios[k])state.calendarios[k]={};state.calendarios[k][String(d)]=v;logChange('CALENDÁRIO ALTERADO',null,`${meses[state.mes]}/${state.ano} • dia ${d}: ${old||'DIA NORMAL'} → ${v||'DIA NORMAL'}`);save()}
 function resetCalendarDay(d){const k=monthKey(),old=calendarValue(d);if(state.calendarios[k])delete state.calendarios[k][String(d)];logChange('CALENDÁRIO RESTAURADO',null,`${meses[state.mes]}/${state.ano} • dia ${d}: ${old||'DIA NORMAL'} → ${autoCalendarValue(d)||'DIA NORMAL'}`);save()}
 function switchTab(name){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id==='panel-'+name));document.getElementById('previewShell').classList.remove('visible');if(name==='calendario')renderCalendar();if(name==='gerar')renderGenerateControls()}
-function initMonthControls(){const ms=document.getElementById('mes');ms.innerHTML=meses.slice(1).map((x,i)=>`<option value="${i+1}">${x}</option>`).join('');ms.value=state.mes;document.getElementById('ano').value=state.ano;ms.addEventListener('change',()=>{state.mes=+ms.value;renderAll()});document.getElementById('ano').addEventListener('change',e=>{state.ano=+e.target.value||state.ano;renderAll()})}
+function initMonthControls(){const ms=document.getElementById('mes');ms.innerHTML=meses.slice(1).map((x,i)=>`<option value="${i+1}">${x}</option>`).join('');ms.value=state.mes;document.getElementById('ano').value=state.ano;ms.addEventListener('change',()=>{state.mes=+ms.value;renderAll();cloudChanged()});document.getElementById('ano').addEventListener('change',e=>{state.ano=+e.target.value||state.ano;renderAll();cloudChanged()})}
 function renderAll(){renderServidores();renderCalendar();renderGenerateControls();updateDataStatus();if(document.getElementById('modalSituacoes').classList.contains('open'))renderSituacoesModal()}
 function situationCountForMonth(s){return s.situacoes.filter(x=>x.ano===state.ano&&x.mes===state.mes).length}
 function renderServidores(){const q=document.getElementById('buscaServidor').value.trim().toLocaleLowerCase('pt-BR');const nums=numeroMap();const rows=sortedServidores().filter(s=>!q||[s.nome,s.matricula,s.cargo,s.turno].some(x=>String(x).toLocaleLowerCase('pt-BR').includes(q)));document.getElementById('servidoresBody').innerHTML=rows.map(s=>`<tr>
@@ -331,7 +444,12 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.t
 document.getElementById('importarDados').onclick=()=>document.getElementById('importFile').click();document.getElementById('importFile').addEventListener('change',e=>{const f=e.target.files?.[0];if(f)importWorkbookFile(f)});document.getElementById('exportarDados').onclick=exportWorkbookFile;
 document.getElementById('addServidor').onclick=()=>openServidor();document.getElementById('salvarServidor').onclick=saveServidor;document.getElementById('buscaServidor').addEventListener('input',renderServidores);document.getElementById('selectAll').addEventListener('change',e=>{const q=document.getElementById('buscaServidor').value.trim().toLocaleLowerCase('pt-BR');sortedServidores().filter(s=>!q||[s.nome,s.matricula,s.cargo,s.turno].some(x=>String(x).toLocaleLowerCase('pt-BR').includes(q))).forEach(s=>e.target.checked?selectedIds.add(s.id):selectedIds.delete(s.id));renderServidores()});
 document.getElementById('sitModo').onchange=()=>{renderSituacaoFields();updateMiniPreview()};document.getElementById('sitDescricao').addEventListener('input',updateMiniPreview);document.getElementById('salvarSituacao').onclick=saveSituacao;document.getElementById('cancelarEdicaoSituacao').onclick=cancelSituacaoEdit;document.getElementById('resetCalendar').onclick=resetMonthCalendar;document.getElementById('genModo').onchange=updateGenVisibility;document.getElementById('genPessoa').onchange=updateGenSummary;document.getElementById('genCargo').onchange=updateGenSummary;document.getElementById('genTurno').onchange=updateGenSummary;document.getElementById('gerarFolhas').onclick=generate;document.getElementById('fecharPreview').onclick=()=>{document.getElementById('previewShell').classList.remove('visible');switchTab('gerar')};document.getElementById('imprimir').onclick=()=>window.print();
-window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+document.getElementById('conectarNuvem').onclick=()=>{if(cloudConnected){cloudDisconnect();return}document.getElementById('chaveNuvem').value='';openModal('modalNuvem');document.getElementById('chaveNuvem').focus()};
+document.getElementById('confirmarNuvem').onclick=cloudConnect;
+document.getElementById('chaveNuvem').addEventListener('keydown',e=>{if(e.key==='Enter')cloudConnect()});
+document.getElementById('salvarNuvem').onclick=cloudSaveNow;
+cloudControls();
+window.addEventListener('beforeunload',e=>{if(dirty||cloudPending||cloudBusy){e.preventDefault();e.returnValue=''}});
 load();initMonthControls();renderAll();
 </script>
 </body></html>
