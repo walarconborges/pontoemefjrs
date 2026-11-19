@@ -35,3 +35,9 @@ A chave é mantida **somente na memória da aba**, e não é persistida em local
 O site permanece em um único `index.html` sem dependências externas de JavaScript. O código da API em `cloudflare/worker.js` é publicado separadamente no painel Cloudflare. Mudanças no HTML disparam o GitHub Actions.
 
 Para testar sem dados pessoais: conecte à nuvem, crie um registro fictício, salve, recarregue a página, conecte novamente e confirme se o registro voltou. Teste também a edição do calendário e a exportação XLSX.
+
+## Emissão em lote de meses
+
+Na aba **Gerar folha de ponto**, selecione **Período de impressão → Vários meses em um PDF**. Informe o mês inicial, o mês final e o ano. A visualização gera as folhas mês a mês em um só documento, mantendo o mesmo modelo A4. Use **Imprimir / Salvar em PDF** para gravar todas as páginas num único PDF.
+
+**Importante para o histórico:** o cadastro atual é uma lista geral de vínculos e pode não representar exatamente a composição da escola em cada mês de 2026. Antes de imprimir arquivos históricos definitivos, confira as ocorrências individuais, o calendário e a lista de servidores referentes a cada mês. Importar uma planilha XLSX substitui o estado inteiro, não acrescenta automaticamente outro mês: consolide os dados primeiro e mantenha um backup.
