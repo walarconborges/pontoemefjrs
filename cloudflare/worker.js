@@ -4,7 +4,7 @@
  *
  * Cloudflare Worker:
  *   KV binding: DADOS -> pontoemefjrs-dados
- *   Secret: API_TOKEN (mínimo 32 caracteres aleatórios)
+ *   Secret: API_TOKEN (mínimo 16 caracteres; senha exclusiva e difícil de adivinhar)
  *
  * Sem API_TOKEN configurado, nenhuma leitura ou gravação é permitida.
  * A API só aceita requisições de navegador da origem oficial do GitHub Pages.
@@ -40,7 +40,7 @@ function json(body, status = 200, origin = null) {
 }
 
 async function isAuthorized(request, secret) {
-  if (typeof secret !== "string" || secret.length < 32) return false;
+  if (typeof secret !== "string" || secret.length < 16) return false;
   const header = request.headers.get("Authorization") || "";
   if (!header.startsWith("Bearer ")) return false;
   const supplied = header.slice(7);
@@ -118,7 +118,7 @@ export default {
       return json({ ok: false, erro: "Método não permitido." }, 405, origin);
     }
 
-    if (!env.DADOS || typeof env.API_TOKEN !== "string" || env.API_TOKEN.length < 32) {
+    if (!env.DADOS || typeof env.API_TOKEN !== "string" || env.API_TOKEN.length < 16) {
       return json({ ok: false, erro: "API ainda não configurada." }, 503, origin);
     }
 
