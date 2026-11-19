@@ -7,7 +7,7 @@ Aplicação web de código público para cadastro de vínculos, ocorrências men
 - **Site:** GitHub Pages, publicado automaticamente pelo GitHub Actions em `https://walarconborges.github.io/pontoemefjrs/`.
 - **API:** Cloudflare Worker em `https://pontoemefjrs-api.wilberalarcon.workers.dev`. Código-fonte em `cloudflare/worker.js`.
 - **Armazenamento:** Cloudflare Workers KV `pontoemefjrs-dados`, ligado à API como `DADOS`.
-- **Autorização:** segredo `API_TOKEN` da Cloudflare (no mínimo 32 caracteres aleatórios). A API verifica o token a cada acesso. CORS é restrito à origem do GitHub Pages, mas **não substitui a autenticação**.
+- **Autorização:** segredo `API_TOKEN` da Cloudflare (no mínimo 16 caracteres; senha exclusiva, difícil de adivinhar). A API verifica o token a cada acesso. CORS é restrito à origem do GitHub Pages, mas **não substitui a autenticação**.
 
 ## Como usar a sincronização
 
